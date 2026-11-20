@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: license-server
+    runtime: node
+    plan: starter        # free tier has no persistent disk — this data must survive restarts
+    buildCommand: "true"  # no dependencies to install
+    startCommand: node server.js
+    disk:
+      name: license-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATA_DIR
+        value: /data
+      - key: ADMIN_PASSWORD
+        sync: false        # you set this yourself in the Render dashboard, not in Git

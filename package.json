@@ -1,0 +1,13 @@
+{
+  "name": "license-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Admin server for managing cafe-system restaurant subscriptions.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
