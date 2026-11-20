@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>License Admin</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 0; background: #f4f5f7; color: #1a1a1a; }
+  @media (prefers-color-scheme: dark) { body { background: #16181c; color: #e8e8e8; } .card { background: #22252b !important; border-color: #33363d !important; } input,button.s { background:#1b1d22 !important; color:#e8e8e8 !important; border-color:#33363d !important; } }
+  header { padding: 16px 20px; background: #1a1a2e; color: #fff; }
+  header h1 { margin: 0; font-size: 18px; }
+  main { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+  .card { background: #fff; border: 1px solid #e2e4e8; border-radius: 10px; padding: 18px; margin-bottom: 18px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #e2e4e8; font-size: 14px; vertical-align: top; }
+  input { padding: 7px 9px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+  button { padding: 7px 12px; border-radius: 6px; border: 1px solid #333; background: #1a1a2e; color: #fff; cursor: pointer; font-size: 13px; }
+  button.s { background: #fff; color: #1a1a2e; border: 1px solid #ccc; }
+  button.danger { background: #a11; border-color: #a11; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .badge { padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .ok { background: #d5f3e0; color: #0a6b35; }
+  .bad { background: #fde0e0; color: #9c1414; }
+  .warn { background: #fff0cc; color: #8a5a00; }
+  .muted { color: #888; font-size: 12px; }
+  .url { font-family: monospace; font-size: 12px; word-break: break-all; background: #f0f1f3; padding: 6px 8px; border-radius: 6px; display: block; margin-top: 4px; }
+  @media (prefers-color-scheme: dark) { .url { background:#1b1d22; } }
+</style>
+</head>
+<body>
+<header><h1>Subscription / License Admin</h1></header>
+<main id="app"></main>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let PASSWORD = sessionStorage.getItem('adminPw') || '';
+
+async function call(path, opts) {
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'Request failed');
+  return j;
+}
+
+function daysLeft(expiresAt) {
+  if (!expiresAt) return null;
+  return Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86400000);
+}
+
+function statusBadge(c) {
+  if (!c.active) return '<span class="badge bad">Paused</span>';
+  const d = daysLeft(c.expiresAt);
+  if (d != null && d < 0) return '<span class="badge bad">Expired</span>';
+  if (d != null && d <= 7) return '<span class="badge warn">' + d + 'd left</span>';
+  return '<span class="badge ok">Active' + (d != null ? ' · ' + d + 'd left' : '') + '</span>';
+}
+
+async function login() {
+  const app = $('#app');
+  app.innerHTML = '<div class="card" style="max-width:360px;margin:60px auto;text-align:center">' +
+    '<h2 style="margin-top:0">Admin login</h2>' +
+    '<input id="pw" type="password" placeholder="Admin password" style="width:100%;margin-bottom:10px" autofocus>' +
+    '<div id="err" style="color:#c00;font-size:13px;margin-bottom:8px"></div>' +
+    '<button id="go" style="width:100%">Enter</button></div>';
+  const tryLogin = async () => {
+    const pw = $('#pw').value;
+    try { await call('/api/admin/ping?password=' + encodeURIComponent(pw));
+      PASSWORD = pw; sessionStorage.setItem('adminPw', pw); render(); }
+    catch { $('#err').textContent = 'Wrong password'; }
+  };
+  $('#go').onclick = tryLogin;
+  $('#pw').onkeydown = e => { if (e.key === 'Enter') tryLogin(); };
+}
+
+async function render() {
+  if (!PASSWORD) return login();
+  let data;
+  try { data = await call('/api/admin/list?password=' + encodeURIComponent(PASSWORD)); }
+  catch { sessionStorage.removeItem('adminPw'); PASSWORD = ''; return login(); }
+  const origin = location.origin;
+  const rows = data.clients.map(c => `
+    <tr>
+      <td>
+        <strong>${esc(c.name)}</strong><br>
+        <span class="muted">started ${new Date(c.startedAt).toLocaleDateString()} · plan ${c.plan}mo</span>
+        <span class="url">${origin}/api/status/${c.id}</span>
+      </td>
+      <td>${statusBadge(c)}<br><span class="muted">${c.expiresAt ? 'until ' + new Date(c.expiresAt).toLocaleDateString() : ''}</span></td>
+      <td>
+        <div class="row">
+          <input type="number" min="1" value="1" style="width:55px" id="m_${c.id}">
+          <button class="s" onclick="renew('${c.id}')">Renew (months)</button>
+        </div>
+        <div class="row" style="margin-top:6px">
+          ${c.active ? '<button class="s" onclick="pause(\'' + c.id + '\')">Pause</button>' : '<button onclick="resume(\'' + c.id + '\')">Resume</button>'}
+          <button class="s" onclick="copyUrl('${origin}/api/status/${c.id}')">Copy URL</button>
+          <button class="danger" onclick="del('${c.id}','${esc(c.name)}')">Delete</button>
+        </div>
+      </td>
+    </tr>`).join('');
+  $('#app').innerHTML = `
+    <div class="card">
+      <h2 style="margin-top:0">Add a restaurant</h2>
+      <div class="row">
+        <input id="newName" placeholder="Restaurant name" style="flex:1;min-width:180px">
+        <select id="newMonths">
+          <option value="3">3 months</option>
+          <option value="6" selected>6 months</option>
+          <option value="12">12 months</option>
+        </select>
+        <button onclick="addClient()">Add</button>
+      </div>
+      <p class="muted">After adding, copy the URL it gives you into that restaurant's <code>config.json</code> as <code>"licenseUrl"</code>.</p>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">Clients (${data.clients.length})</h2>
+      <table><tbody>${rows || '<tr><td class="muted">No clients yet.</td></tr>'}</tbody></table>
+    </div>`;
+}
+
+async function addClient() {
+  const name = $('#newName').value.trim(); if (!name) return alert('Enter a name');
+  const months = +$('#newMonths').value;
+  try {
+    const r = await call('/api/admin/action', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: PASSWORD, op: 'add', name, months }) });
+    await navigator.clipboard.writeText(location.origin + '/api/status/' + r.id).catch(() => {});
+    alert('Added "' + name + '". Their license URL was copied to your clipboard:\n' + location.origin + '/api/status/' + r.id +
+      '\n\nPaste this into their config.json as "licenseUrl".');
+    render();
+  } catch (e) { alert(e.message); }
+}
+async function renew(id) {
+  const months = +document.getElementById('m_' + id).value || 1;
+  try { await call('/api/admin/action', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: PASSWORD, op: 'renew', id, months }) }); render(); }
+  catch (e) { alert(e.message); }
+}
+async function pause(id) {
+  if (!confirm('Pause this restaurant\'s software now?')) return;
+  try { await call('/api/admin/action', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: PASSWORD, op: 'pause', id }) }); render(); }
+  catch (e) { alert(e.message); }
+}
+async function resume(id) {
+  try { await call('/api/admin/action', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: PASSWORD, op: 'resume', id }) }); render(); }
+  catch (e) { alert(e.message); }
+}
+async function del(id, name) {
+  if (!confirm('Delete "' + name + '" permanently? This cannot be undone.')) return;
+  try { await call('/api/admin/action', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: PASSWORD, op: 'delete', id }) }); render(); }
+  catch (e) { alert(e.message); }
+}
+function copyUrl(u) { navigator.clipboard.writeText(u).then(() => alert('Copied:\n' + u)).catch(() => alert(u)); }
+
+render();
+</script>
+</body>
+</html>
